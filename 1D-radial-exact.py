@@ -330,12 +330,14 @@ class concentric_cylinder:
         ax1 = fig.add_subplot(111)
         if plotQ==True:
             Qax = ax1.twinx()
-            Qax.set_ylabel(r'Heat transfer kW/m',color='b')
-            Q_plot = Qax.plot(rads*1e3,np.array(Q)/1e3,'b-', label='Heat Transfer')
+            Qax.set_ylabel(r'Heat transfer W/m',color='b')
+            Qax.plot(rads*1e3,Q,'b-', label='Heat Transfer')
+            Qax.ticklabel_format(style='sci',axis='y', scilimits=(-2,2))
         if plotq==True:
             qax = ax1.twinx()
-            qax.set_ylabel(r'Heat flux MW/m$^2$',color='m')
-            q_plot = qax.plot(rads*1e3,np.array(q)/1e6,'m-', label='Heat Flux')
+            qax.set_ylabel(r'Heat flux W/m$^2$',color='m')
+            qax.plot(rads*1e3,q,'m-', label='Heat Flux')
+            qax.ticklabel_format(style='sci',axis='y', scilimits=(0,0))
         if bound_labs==1:
             ax1.plot([self.radii[0]*1e3,self.radii[0]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
             ax1.plot([self.radii[-1]*1e3,self.radii[-1]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
@@ -346,19 +348,39 @@ class concentric_cylinder:
                     ax1.plot([self.radii[i+1]*1e3,self.radii[i+1]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
         ax1.set_xlabel('Radius [mm]')
         ax1.set_ylabel(r'Temperature $^{\circ}$C', color='r')
-        temp_plot = ax1.plot(rads*1e3,T,'r-', label='Temperature')
+        ax1.plot(rads*1e3,T,'r-', label='Temperature')
         if plotq == 1 and plotQ==1:
+            #offset axis to stop overlap
             qax.spines['right'].set_position(('outward',60))
-            
+            qax.get_yaxis().get_offset_text().set_visible(False)
+            qax_max = abs(max(max(qax.get_yticks()),-min(qax.get_yticks())))
+            expo = np.floor(np.log10(qax_max)).astype(int)
+            qax.annotate('1e{}'.format(expo),xy=(1,1),
+                         xycoords='axes fraction',
+                         horizontalalignment = 'right',
+                         verticalalignment='bottom',
+                         xytext=(60,0),
+                         textcoords='offset points')
+            #align zeros if present in data
+            if np.nanmax(q)>=0 and np.nanmin(q)<=0:
+                q_range = np.nanmax(q)-np.nanmin(q)
+                Q_range = np.nanmax(Q)-np.nanmin(Q)
+                
+                max_factor = max(np.nanmax(Q)/Q_range, np.nanmax(q)/q_range)
+                min_factor = min(np.nanmin(Q)/Q_range, np.nanmin(q)/q_range)
+                qax.set_ylim(min_factor*q_range, max_factor*q_range)
+                Qax.set_ylim(min_factor*Q_range, max_factor*Q_range)
+                print(max_factor,min_factor)
+        fig.tight_layout()
         return fig
         
-a = solid_layer(1.5e-3,30,10e7,1e-5)
+a = solid_layer(1.5e-3,30,10e7,1e-4)
 b = fluid_layer(1e-3,360,1e4,1e4)
-c = solid_layer(0.4e-3,10,0,1e-5)
+c = solid_layer(0.4e-3,10,10e7,1e-4)
 BC1 = boundary_condition('temperature', 'outer',T_inf=450, R=1e-6)
 BC2 = boundary_condition('fluid', 'inner', T_inf=450, h=1e4)
 BC3 = boundary_condition('fluid', 'outer', T_inf=450, h=1e4)
-BCHFout = boundary_condition('heat flux', 'outer',q=-1e6)
+BCHFout = boundary_condition('heat flux', 'outer',q=1)
 BCHFin = boundary_condition('heat flux', 'inner',q=-1e6)
-A = concentric_cylinder(5e-3,[c,a,c,b,c,a,c,c,a,a,b,a],BC3,BC2)
+A = concentric_cylinder(5e-3,[c,a,c,b,c,a,c,c,a,b,a],BC3,BC2)
 B = concentric_cylinder(5e-3,[c,a,c],BC3,BCHFout)
