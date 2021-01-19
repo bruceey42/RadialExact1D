@@ -1,23 +1,32 @@
 # -*- coding: utf-8 -*-
 """
 Attempt to creat a generalised 1-D code for heat transfer through concentric
-cylinders with internal heat generation. Boundary condition support:
-    1. Two temperatures (inner/outer) defined.
-    2. Two (inner and outer) sets of bulk coolant temperatures and HTCs
-    defined.
-    3. A combination of the above.
-    2. A temperature or bulk temperature and HTC and a heat flux (at inner/
-    outer boundaries).
-Will use "layer" classes with solid and fluid subclasses.
-Solid layers will be defined by:
-    Thickness, conductivity, bulk heating, outer thermal resistance.
-    Outer thermal resistance ignored if:
-        -is ultimate outer edge.
-        -is not between two fluid layers.
-Fluid layers will be defined by:
-    Thickness, bulk temperature, inner HTC and outer HTC.
-Thermal resistance can be added after a solid layer but MUST be followed by a
-solid layer.
+cylinders with internal heat generation.
+The concentric_cylinder class is used to assemble and solve the system of
+equations. It takes,
+-the inner radius,
+-a list containing layer objects,
+-2 boundary conditions.
+
+Boundary condition (boundary_condition class) support:
+    1. Temperature with optional thermal resistance at the interface.
+    2. Fluid BC with bulk temperature and heat transfer coefficient defined.
+    3. Defined heat flux defined at the boundary.
+    -These BCs (boundary conditions) are set at 'inner' or 'outer' location.
+    -If two BCs of type 1 and 2 are selected then they cannot be at the same
+    location.
+    -Two heat flux conditions cannot be defined at once (this overconstrains the
+    system for set internal heat generation).
+    -Exactly 2 boundary conditions must be provided.
+
+To build up the layer list 2 layer classes are provided:
+    -Solid layers
+    -Fluid layers
+Solid layers have a defined thickness and conductivity with optional internal
+heat generation and outer layer bound thermal resistance.
+Fluid layers have defined bulk temperature and inner and outer HTC.
+
+They can be built up as follows:
 Radial outward build configuration.
     First layer must be solid.
     Solid layers can be followed by a:
@@ -30,6 +39,10 @@ Radial outward build configuration.
         -Solid layer.
     Final layer must be a solid layer.
     
+The kayer properties are then arranged into a system of simultaneous equations
+to solve the integration constants for all the solid layers.
+After these constants have been calculated the temperature, heatflux or
+heat transfer at any radial position can be trivially calculated.
 @author: bruce
 """
 import numpy as np
