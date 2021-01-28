@@ -165,3 +165,4 @@ def T_profile_case_5(Ti_inf, To_inf, h1, h2, U1, U2, k1, k2, ri, ro, r12, R12):
         )
     return r_, T_
 results5=T_profile_case_5(Ti,To,hi,ho,0,1e8,k*10,k,ri,ri+4e-3,ri+0.5e-3, R12)
+results6=T_profile_case_5(450,To,hi,ho,0,1e8,k*10,k,10e-3,14e-3,10.5e-3, R12)
