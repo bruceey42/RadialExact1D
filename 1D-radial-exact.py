@@ -462,6 +462,8 @@ class radial_heat_transfer_1d:
                 Qvol = layer.V_heat*np.pi*(self.radii[i+1]**2-self.radii[i]**2)
                 row['net heat transfer [W/m]']=Qi-Qo+Qvol
                 row['internal heat generation [W/m]']=Qvol
+                row['inner boundary heat transfer [W/m]']=Qi
+                row['outer boundary heat transfer [W/m]']=Qo
                 i_sol+=1
             elif layer.layer_type=='fluid':
                 Ti = self.T(self.radii[i]*(1-1e-10))
@@ -473,6 +475,8 @@ class radial_heat_transfer_1d:
                 Qi = self.Q(self.radii[i]*(1-1e-10))
                 Qo = self.Q(self.radii[i+1])
                 Qnet = Qi-Qo
+                row['inner boundary heat transfer [W/m]']=Qi
+                row['outer boundary heat transfer [W/m]']=Qo
                 row['net heat transfer into layer/boundary [W/m]']=Qnet
             rows.append(pd.Series(data=row))
             i+=1
