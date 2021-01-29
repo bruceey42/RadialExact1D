@@ -2,7 +2,7 @@
 """
 Attempt to create a generalised 1-D code for heat transfer through concentric
 cylinders with internal heat generation.
-The radial_heat_transfer_1d class is used to assemble and solve the system of
+The RadialExact1D class is used to assemble and solve the system of
 equations. It takes,
 -the inner radius,
 -a list containing layer objects,
@@ -94,7 +94,32 @@ class boundary_condition:
                 raise NameError('Missing required keyword arguement "{}" for BC_type "{}" for {}'.format(key,BC_type,self))
         if not hasattr(self,'label'):
             self.label=None
-class radial_heat_transfer_1d:
+class RadialExact1D:
+    """
+    Class for building up system of equations, solving the integration
+    constants for the solid layers.
+    
+    Parameters
+    ----------
+        rad_inner: float
+            the inner radius of the system in meters.
+        layers: list of layer objects
+            The layers from inner to outer radius inside a list.
+        BC_1: boundary_layer object
+            The first boundary layer.
+        BC_1: boundary_layer object
+            The second boundary layer.    
+    Returns
+    ----------
+    RadialExact1D object.
+    
+    Methods to evaluate the temperature, heat flux and heat transfer at any
+    radial position.
+    Method to plot the temperature, heat flux and heat transfer data.
+    Method to return a dataframe of inputs and most results of interest to be
+    eacily manipulated, filtered and exported in desired data format using
+    pandas inbuilt methods.
+    """
     def __init__(self, rad_inner, layers, BC_1, BC_2):
         if rad_inner<=0:
             raise ValueError('rad_inner must be non-zero and positive.')
@@ -505,7 +530,9 @@ class radial_heat_transfer_1d:
             'BC_type':'boundary condition type',
             'h_in':'inner heat transfer coefficient [W/m^2K]',
             'h_out':'outer heat transfer coefficient [W/m^2K]',
-            'T_inf':'Bulk temperature [degC]'
+            'T_inf':'Bulk temperature [degC]',
+            'q':'boundary heat flux [W/m^2]',
+            'R':'boundary thermal resistance [m^2K/W]'
             }
         df=pd.DataFrame(rows)
         df=df.rename(columns=column_head)
@@ -519,9 +546,9 @@ BC3 = boundary_condition('fluid', 'outer', T_inf=400, h=1e4, label='outer fluid'
 BC4 = boundary_condition('fluid', 'inner', T_inf=400, h=1e4, label='inner fluid')
 BCHFout = boundary_condition('heat flux', 'outer',q=1e6)
 BCHFin = boundary_condition('heat flux', 'inner',q=-1e6)
-A = radial_heat_transfer_1d(5e-3,[c,a,c,b,c,a,c],BC3,BC2)
-B = radial_heat_transfer_1d(5e-3,[c,a,c],BC3,BCHFout)
-C=radial_heat_transfer_1d(5e-3,[c,a,c],BC3,BC4)
+A = RadialExact1D(5e-3,[c,a,c,b,c,a,c],BC3,BC2)
+B = RadialExact1D(5e-3,[c,a,c],BC3,BCHFout)
+C=RadialExact1D(5e-3,[c,a,c],BC3,BC4)
 c4_1=solid_layer(0.5e-3,300,0,1e-5)
 c4_2=solid_layer(3.5e-3,30,1e8,0)
-Comp_c4 = radial_heat_transfer_1d(5e-3,[c4_1,c4_2,b,c4_1,c4_2],BC2,BC3)
+Comp_c4 = RadialExact1D(5e-3,[c4_1,c4_2,b,c4_1,c4_2],BC2,BC3)
