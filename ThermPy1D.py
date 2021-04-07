@@ -177,35 +177,12 @@ class boundary_condition:
                 raise NameError('Missing required keyword arguement "{}" for BC_type "{}" for {}'.format(key,BC_type,self))
         if not hasattr(self,'label'):
             self.label=None
-class RadialExact1D:
+      
+class Thermal1D:
     """
-    Class for building up system of equations, solving the integration
-    constants for the solid layers.
-    
-    Parameters
-    ----------
-        rad_inner: float
-            the inner radius of the system in meters.
-        layers: list of layer objects
-            The layers from inner to outer radius inside a list.
-        BC_1: boundary_layer object
-            The first boundary layer.
-        BC_1: boundary_layer object
-            The second boundary layer.    
-    Returns
-    ----------
-    RadialExact1D object.
-    
-    Methods to evaluate the temperature, heat flux and heat transfer at any
-    radial position.
-    Method to plot the temperature, heat flux and heat transfer data.
-    Method to return a dataframe of inputs and most results of interest to be
-    eacily manipulated, filtered and exported in desired data format using
-    pandas inbuilt methods.
-    """
-    def __init__(self, rad_inner, layers, BC_1, BC_2):
-        if rad_inner<=0:
-            raise ValueError('rad_inner must be non-zero and positive.')
+    Generic 1D class with common methods useful to 1D thermal systems.
+    """            
+    def __init__(self, layers, BC_1, BC_2):
         if layers[0].layer_type == 'fluid':
             raise RuntimeError('First layer cannot be a "fluid_layer" object.\n'+
                               'Use fluid inner boundary condition instead.')
@@ -216,9 +193,8 @@ class RadialExact1D:
             raise RuntimeError('Cannot have two heat flux boundary conditions.')
         if (BC_1.BC_side==BC_2.BC_side) and ((BC_1.BC_type!='heat flux') and (BC_2.BC_type!='heat flux')):
             raise RuntimeError('Cannot have two BCs at same boundary unless 1 is type "heat flux".')
-        radii = [rad_inner]
         solid_map=[]
-        fluid_map=[]         
+        fluid_map=[]
         for i in range(len(layers)):
             if layers[i].layer_type=='fluid' and layers[i+1].layer_type=='fluid':
                 raise RuntimeError('Cannot have two consecutive fluid layers\n'+
@@ -229,8 +205,6 @@ class RadialExact1D:
             elif layers[i].layer_type=='fluid':
                 solid_map.append(0)
                 fluid_map.append(1)
-            radii.append(radii[i]+layers[i].t)
-        self.radii = radii
         self.solid_map = solid_map
         self.fluid_map = fluid_map
         self.layers = layers
@@ -256,12 +230,6 @@ class RadialExact1D:
         matrices.
         -------
         """
-        def A_for_T_bound(sgn,r,k,R):
-            #integration constant coefficients
-            return np.array([[sgn*k*R/r-np.log(r), -1]])
-        def B_for_T_bound(sgn,r,k,R,V,T_inf):
-            #RHS of ODE solution
-            return V*r/2*(sgn*R-r/(2*k)) - T_inf
         #initialise matrices
         N=self.solid_map.count(1) #count number of solid layers
         A_, B_ = np.zeros((2*N,2*N)), np.zeros((2*N,1))
@@ -270,12 +238,12 @@ class RadialExact1D:
         for BC_ in self.BC:
             if BC_.BC_side == 'inner':
                 n, sgn=0, 1 # first layer index, sign for heat resistance term
-                r = self.radii[0]
+                r = self.distance[0]
                 V = self.layers[0].V_heat
                 k = self.layers[0].k
             else:
                 n, sgn=N-1,-1 #last layer index, sign for heat resistance term
-                r = self.radii[-1]
+                r = self.distance[-1]
                 V = self.layers[-1].V_heat
                 k = self.layers[-1].k
             if BC_.BC_type!='heat flux':
@@ -283,12 +251,11 @@ class RadialExact1D:
                     R= BC_.R
                 else:
                     R= 1/BC_.h
-                A_[j,2*n:2*n+2]=A_for_T_bound(sgn,r,k,R)
-                B_[j,0] = B_for_T_bound(sgn,r,k,R,V,BC_.T_inf)
+                A_[j,2*n:2*n+2], B_[j,0] = self.temperature_bound(
+                        sgn,r,k,R,V,BC_.T_inf)
                 j+=1
             else: #for heat flux BC
-                A_[j,2*n:2*n+2]=np.array([[1, 0]])
-                B_[j,0] = -r/k*(BC_.q - V*r/2)
+                A_[j,2*n:2*n+2], B_[j,0] = self.heatflux_bound(r,k,BC_.q,V)
                 j+=1    
         #apply layer temp and heat continuity
         for i in range(len(self.layers)-1):
@@ -296,38 +263,38 @@ class RadialExact1D:
             if self.layers[i].layer_type == self.layers[i+1].layer_type:
                 #statement only triggered for solid-solid interfaces as fluid-fluid layer arrangements are not allowed.
                 #heat continuity
-                r=self.radii[i+1]
+                r=self.distance[i+1]
                 k0=self.layers[i].k
                 k1=self.layers[i+1].k
                 V0=self.layers[i].V_heat
                 V1=self.layers[i+1].V_heat
                 R=self.layers[i].R_out
-                A_[j,2*i_sol:2*i_sol+4]=np.array([[-k0,0,k1,0]])
-                B_[j,0]=r**2/2*(V1-V0)
+                A_[j,2*i_sol:2*i_sol+4], B_[j,0] = self.heat_continuity(
+                        r,k0,k1,V0,V1)
                 j+=1
                 #temp continuity
-                A_[j,2*i_sol:2*i_sol+4]=np.array([[np.log(r)+R*k0/r, 1, -np.log(r), -1]])
-                B_[j,0]=r/2*(V0*(R+r/(2*k0))-V1*r/(2*k1))
+                A_[j,2*i_sol:2*i_sol+4], B_[j,0] = self.temp_continuity(
+                        r,k0,k1,V0,V1,R)              
                 j+=1
             elif self.layers[i].layer_type == 'solid':
                 #only triggered when going from solid-fluid
                 #define based on solid-fluid transition
-                r=self.radii[i+1] 
+                r=self.distance[i+1] 
                 k=self.layers[i].k
                 V=self.layers[i].V_heat
                 R=1/(self.layers[i+1].h_in)
                 T_inf = self.layers[i+1].T_inf
-                A_[j,2*i_sol:2*i_sol+2]=A_for_T_bound(-1,r,k,R)
-                B_[j,0] = B_for_T_bound(-1,r,k,R,V,T_inf)
+                A_[j,2*i_sol:2*i_sol+2],B_[j,0]=self.temperature_bound(
+                        -1,r,k,R,V,T_inf)
                 j+=1
                 #second boundary condition (fluid-solid)
-                r=self.radii[i+2]
+                r=self.distance[i+2]
                 k=self.layers[i+2].k
                 V=self.layers[i+2].V_heat
                 R=1/(self.layers[i+1].h_out)
                 T_inf = self.layers[i+1].T_inf
-                A_[j,2*(i_sol+1):2*(i_sol+1)+2]=A_for_T_bound(1,r,k,R)
-                B_[j,0] = B_for_T_bound(1,r,k,R,V,T_inf)
+                A_[j,2*(i_sol+1):2*(i_sol+1)+2],B_[j,0] = self.temperature_bound(
+                        1,r,k,R,V,T_inf)
                 j+=1
             else:
                 pass
@@ -335,28 +302,8 @@ class RadialExact1D:
         self.B_=B_ #store RHS
         C_ = np.linalg.lstsq(A_,B_,rcond=None)[0] #solve integration constants
         self.C_=C_ #store result as attribute
-    def layer_index_for_r(self,rad):
-        """
-        Parameters
-        ----------
-        rad : int or float
-            radius in m
-
-        Returns
-        -------
-        layer : layer object which covers that radial position
-        if at a boundary returns the outer layer or "inner" and "outer" to
-        indicate being in the "inner" or "outer" boundary condition regime.
-        """
-        if rad < self.radii[0]:
-            return 'inner'
-        elif rad >= self.radii[-1]:
-            return 'outer'
-        else: 
-            for i in range(len(self.layers)):
-                if rad >= self.radii[i] and rad< self.radii[i+1]:
-                    return i            
-    def T(self,rad):
+    
+    def T(self,distance):
         """
         Returns temperature [K] given any radial position [m]
         
@@ -370,105 +317,54 @@ class RadialExact1D:
         T: float
             Temperature at position [K].
         """
-        layer_i = self.layer_index_for_r(rad)
+        layer_i = self.layer_index_for_distance(distance)
         if layer_i == 'inner':
             if not self.BC_in:
-                return self.T_solid(self.radii[0],self.layers[0],0)[0]
+                return self.T_solid(self.distance[0],self.layers[0],0)[0]
             else:
                 for BC_ in self.BC_in:
                     if BC_.BC_type!='heat flux':
                         return BC_.T_inf
                     else:
-                        return self.T_solid(self.radii[0],self.layers[0],0)[0]
-            return #something if inner temp or fluid BC exists do solid with radii[0] if not
+                        return self.T_solid(self.distance[0],self.layers[0],0)[0]
+            #return something if inner temp or fluid BC exists do solid with distance[0] if not
         elif layer_i == 'outer':
             if not self.BC_out:
-                return self.T_solid(self.radii[-1],self.layers[-1],len(self.layers)-1)[0]
+                return self.T_solid(self.distance[-1],self.layers[-1],len(self.layers)-1)[0]
             else:
                 for BC_ in self.BC_out:
                     if BC_.BC_type!='heat flux':
                         return BC_.T_inf
                     else:
-                        return self.T_solid(self.radii[-1],self.layers[-1],len(self.layers)-1)[0]
+                        return self.T_solid(self.distance[-1],self.layers[-1],len(self.layers)-1)[0]
         else: 
             layer = self.layers[layer_i]
             if layer.layer_type == 'fluid':
                 return layer.T_inf
         
             elif layer.layer_type=='solid':
-                return self.T_solid(rad,layer,layer_i)[0]
-    def q(self,rad):
-        """
-        Returns heat flux [W/m^2] given any radial position [m].
-        
-        Parameters
-        ----------
-        rad : float
-            radial position from center [m].
-
-        Returns
-        -------
-        q: float, np.nan
-            heat flux [W/m^2]. Returns np.nan if not in defined system range.
-        """
-        #calculating heat flux at a radial position
-        if not hasattr(self,'C_'):
-            self.C()
-        layer_i = self.layer_index_for_r(rad)
-        if layer_i == 'outer' or layer_i == 'inner':
-            return np.nan
-        elif self.layers[layer_i].layer_type == 'fluid':
-            return np.nan
-        else:
-            layer = self.layers[layer_i]
-            V_heat, k = layer.V_heat, layer.k
-            solid_layer_i = sum(self.solid_map[0:layer_i])
-            CA = self.C_[2*solid_layer_i][0]
-            return -(k/rad*CA-V_heat*rad/2)
-        
-        return
-    def Q(self,rad):
-        """
-        Returns heat transfer for unit length [W/m] given any radial position
-        [m]
-        
-        Parameters
-        ----------
-        rad : float
-            radial position from center [m].
-
-        Returns
-        -------
-        q: float
-            heat transfer [W/m]. Returns np.nan if not in defined system range.
-        """
-        #calculating heat transfer at a radial position
-        return self.q(rad)*2*np.pi*rad
-        
-        return
-    def T_solid(self,rad,layer,layer_i):
+                return self.T_solid(distance,layer,layer_i)[0]
+    def layer_index_for_distance(self,rad):
         """
         Parameters
         ----------
-        rad : float
-            radial position from center [m].
-        layer : solid_layer object
-            The solid layer in which to calculate the temperature.
-        layer_i : int
-            layer index of the layer in which to calculate the temperature.
+        rad : int or float
+            radius in m
 
         Returns
         -------
-        float
-            Temperature [K]
+        layer : layer object which covers that radial position
+        if at a boundary returns the outer layer or "inner" and "outer" to
+        indicate being in the "inner" or "outer" boundary condition regime.
         """
-    
-        if not hasattr(self,'C_'):
-            self.C()
-        V_heat, k = layer.V_heat, layer.k
-        solid_layer_i = sum(self.solid_map[0:layer_i])
-        CA, CB = self.C_[2*solid_layer_i],self.C_[2*solid_layer_i+1]
-        return -V_heat/(4*k)*rad**2+CA*np.log(rad)+CB
+        if rad < self.distance[0]:
+            return 'inner'
+        elif rad >= self.distance[-1]:
+            return 'outer'
+        else: 
+            for i in range(len(self.layers)):
+                if rad >= self.distance[i] and rad< self.distance[i+1]:
+                    return i                
     def plot_T(self, dpoints=100,
                plotQ=1,
                plotq=1,
@@ -502,7 +398,7 @@ class RadialExact1D:
 
         """
         T=[]
-        rads = np.linspace(self.radii[0]*0.95,self.radii[-1]*1.05,dpoints)
+        distances = np.linspace(self.distance[0]*0.95,self.distance[-1]*1.05,dpoints)
         plotnum=1
         if plotQ==True:
             plotnum+=1
@@ -510,7 +406,7 @@ class RadialExact1D:
         if plotq==True:
             plotnum+=1
             q=[]
-        for r in rads:
+        for r in distances:
             T.append(self.T(r))
             if plotQ==True:
                 Q.append(self.Q(r))
@@ -521,24 +417,27 @@ class RadialExact1D:
         if plotQ==True:
             Qax = ax1.twinx()
             Qax.set_ylabel(r'Heat transfer W/m',color='b')
-            Qax.plot(rads*1e3,Q,'b-', label='Heat Transfer')
+            Qax.plot(distances*1e3,Q,'b-', label='Heat Transfer')
             Qax.ticklabel_format(style='sci',axis='y', scilimits=(-2,2))
         if plotq==True:
             qax = ax1.twinx()
             qax.set_ylabel(r'Heat flux W/m$^2$',color='m')
-            qax.plot(rads*1e3,q,'m-', label='Heat Flux')
+            qax.plot(distances*1e3,q,'m-', label='Heat Flux')
             qax.ticklabel_format(style='sci',axis='y', scilimits=(0,0))
         if show_bounds==1:
-            ax1.plot([self.radii[0]*1e3,self.radii[0]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
-            ax1.plot([self.radii[-1]*1e3,self.radii[-1]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
+            ax1.plot([self.distance[0]*1e3,self.distance[0]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
+            ax1.plot([self.distance[-1]*1e3,self.distance[-1]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
             for i in range(len(self.layers)-1):
                 if self.layers[i].layer_type==self.layers[i+1].layer_type:
-                    ax1.plot([self.radii[i+1]*1e3,self.radii[i+1]*1e3],[min(T),max(T)],'k-.',linewidth=0.5)
+                    ax1.plot([self.distance[i+1]*1e3,self.distance[i+1]*1e3],[min(T),max(T)],'k-.',linewidth=0.5)
                 else:
-                    ax1.plot([self.radii[i+1]*1e3,self.radii[i+1]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
-        ax1.set_xlabel('Radius [mm]')
+                    ax1.plot([self.distance[i+1]*1e3,self.distance[i+1]*1e3],[min(T),max(T)],'k-',linewidth=0.5)
+        if self.analysis_type in ['radial', 'spherical']:
+            ax1.set_xlabel('Radius [mm]')
+        elif self.analysis_type == 'linear':
+            ax1.set_xlabel('Thickness [mm]')
         ax1.set_ylabel(r'Temperature K', color='r')
-        ax1.plot(rads*1e3,T,'r-', label='Temperature')
+        ax1.plot(distances*1e3,T,'r-', label='Temperature')
         if plotq == 1 and plotQ==1:
             #offset axis to stop overlap
             qax.spines['right'].set_position(('outward',60))
@@ -566,14 +465,14 @@ class RadialExact1D:
             layers.
             """
             ycenter=sum(ax1.get_ylim())/2
-            ax1.annotate(r'$Q_{i,net}$='+'{:.3e}'.format(-self.Q(self.radii[0]))
+            ax1.annotate(r'$Q_{i,net}$='+'{:.3e}'.format(-self.Q(self.distance[0]))
                          +' W/m',
                          xy=(0.05,0.5),
                          rotation='vertical',
                          xycoords='axes fraction',
                          verticalalignment='center',
                          horizontalalignment='center')
-            ax1.annotate(r'$Q_{o,net}$='+'{:.3e}'.format(self.Q(self.radii[-1]*(1-1e-10)))
+            ax1.annotate(r'$Q_{o,net}$='+'{:.3e}'.format(self.Q(self.distance[-1]*(1-1e-10)))
                          +' W/m',
                          xy=(0.95,0.5),
                          rotation='vertical',
@@ -583,10 +482,13 @@ class RadialExact1D:
             i=0
             for layer in self.layers:
                 if layer.layer_type=='solid':
-                    Qvol = np.pi*(self.radii[i+1]**2-self.radii[i]**2)*layer.V_heat
+                    if self.analysis_type == 'radial':
+                        Qvol = np.pi*(self.distance[i+1]**2-self.distance[i]**2)*layer.V_heat
+                    elif self.analysis_type == 'linear':
+                        Qvol = self.width*layer.t*layer.V_heat
                     ax1.annotate(r'$Q_{nuc}$='+'{:.3e}'.format(Qvol)
                          +' W/m',
-                         xy=((sum(self.radii[i:i+2])*1e3/2),
+                         xy=((sum(self.distance[i:i+2])*1e3/2),
                              ycenter),
                          rotation='vertical',
                          xycoords='data',
@@ -594,10 +496,10 @@ class RadialExact1D:
                          horizontalalignment='center',
                          )
                 elif layer.layer_type=='fluid':
-                    Qnet = self.Q(self.radii[i]*(1-1e-10))-self.Q(self.radii[i+1])
+                    Qnet = self.Q(self.distance[i]*(1-1e-10))-self.Q(self.distance[i+1])
                     ax1.annotate(r'$Q_{net,fluid}$='+'{:.3e}'.format(Qnet)
                          +' W/m',
-                         xy=((sum(self.radii[i:i+2])*1e3/2),
+                         xy=((sum(self.distance[i:i+2])*1e3/2),
                              ycenter),
                          rotation='vertical',
                          xycoords='data',
@@ -649,7 +551,7 @@ class RadialExact1D:
             yrange = ax1.get_ylim()[1]-ymin
             for layer in self.layers:
                 colour = col[layer]
-                ax1.add_patch(Rectangle((self.radii[i]*1e3,ymin),layer.t*1e3,
+                ax1.add_patch(Rectangle((self.distance[i]*1e3,ymin),layer.t*1e3,
                               yrange,
                               color=colour,
                               label=unique_labels[layer]))
@@ -658,14 +560,14 @@ class RadialExact1D:
                 colour=col[self.BC_in[0]]
                 xmin = ax1.get_xlim()[0]
                 xmax = ax1.get_xlim()[1]
-                xrange_inner = self.radii[0]*1e3-xmin
-                xrange_outer = xmax-self.radii[-1]*1e3
+                xrange_inner = self.distance[0]*1e3-xmin
+                xrange_outer = xmax-self.distance[-1]*1e3
                 ax1.add_patch(Rectangle((xmin,ymin),xrange_inner,
                               yrange,
                               color=colour,
                               label=unique_labels[self.BC_out[0]]))
                 colour=col[self.BC_out[0]]
-                ax1.add_patch(Rectangle((self.radii[-1]*1e3,ymin),xrange_outer,
+                ax1.add_patch(Rectangle((self.distance[-1]*1e3,ymin),xrange_outer,
                               yrange,
                               color=colour,
                               label=unique_labels[self.BC_out[0]]))
@@ -692,47 +594,54 @@ class RadialExact1D:
         #for each layer add data to dataframe.
         i=0
         i_sol=0
+        if self.analysis_type in ['radial', 'spherical']:
+            coord='r'
+        elif self.analysis_type == 'linear':
+            coord='x'
         for layer in self.layers:
             row={}
             row['object']='layer'
             for (key,val) in vars(layer).items():
                 row[key]=val
-            row['r_inner [m]']=self.radii[i]
-            row['r_outer [m]']=self.radii[i+1]
+            row['{}_inner [m]'.format(coord)]=self.distance[i]
+            row['{}_outer [m]'.format(coord)]=self.distance[i+1]
             if layer.layer_type=='solid':
-                Ti = self.T(self.radii[i])
-                To = self.T(self.radii[i+1]*(1-1e-10))
-                row['T_{r_inner} [K]'] = Ti
-                row['T_{r_outer} [K]'] = To
+                Ti = self.T(self.distance[i])
+                To = self.T(self.distance[i+1]*(1-1e-10))
+                row['T_({}_inner) [K]'.format(coord)] = Ti
+                row['T_({}_outer) [K]'.format(coord)] = To
                 row['T_min [K]'] = min([Ti,To])
                 #check if there is the possibility of a max temp higher than
                 #boundary temperatures (i.e. if you set dT/dr=0 do you get
                 #a real radius value... for this CA must be positive.
                 if self.C_[2*i_sol]>0:
                     r_Tmax = (2*layer.k*self.C_[2*i_sol]/layer.V_heat)**0.5
-                    if r_Tmax<=self.radii[i+1] and r_Tmax>=self.radii[i]:
+                    if r_Tmax<=self.distance[i+1] and r_Tmax>=self.distance[i]:
                         row['T_max [K]']=self.T(r_Tmax)
                     else:
                         row['T_max [K]']=max([Ti,To])
                 else:
                     row['T_max [K]']=max([Ti,To])
-                Qi = self.Q(self.radii[i])
-                Qo = self.Q(self.radii[i+1]*(1-1e-10))
-                Qvol = layer.V_heat*np.pi*(self.radii[i+1]**2-self.radii[i]**2)
+                Qi = self.Q(self.distance[i])
+                Qo = self.Q(self.distance[i+1]*(1-1e-10))
+                if self.analysis_type == 'radial':
+                    Qvol = layer.V_heat*np.pi*(self.distance[i+1]**2-self.distance[i]**2)
+                elif self.analysis_type == 'linear':
+                    Qvol = layer.V_heat*self.width*layer.t
                 row['net heat transfer [W/m]']=Qi-Qo+Qvol
                 row['internal heat generation [W/m]']=Qvol
                 row['inner boundary heat transfer [W/m]']=Qi
                 row['outer boundary heat transfer [W/m]']=Qo
                 i_sol+=1
             elif layer.layer_type=='fluid':
-                Ti = self.T(self.radii[i]*(1-1e-10))
-                To = self.T(self.radii[i+1])
-                row['T_{r_inner} [K]']=Ti
-                row['T_{r_outer} [K]']=To
+                Ti = self.T(self.distance[i]*(1-1e-10))
+                To = self.T(self.distance[i+1])
+                row['T_({}_inner) [K]'.format(coord)]=Ti
+                row['T_({}_outer) [K]'.format(coord)]=To
                 row['T_max [K]']=max([Ti,To,layer.T_inf])
                 row['T_min [K]']=min([Ti,To,layer.T_inf])
-                Qi = self.Q(self.radii[i]*(1-1e-10))
-                Qo = self.Q(self.radii[i+1])
+                Qi = self.Q(self.distance[i]*(1-1e-10))
+                Qo = self.Q(self.distance[i+1])
                 Qnet = Qi-Qo
                 row['inner boundary heat transfer [W/m]']=Qi
                 row['outer boundary heat transfer [W/m]']=Qo
@@ -749,9 +658,9 @@ class RadialExact1D:
                     key='h_out'
                 row[key]=val
             if BC.BC_side == 'inner':
-                Qnet = -self.Q(self.radii[0])
+                Qnet = -self.Q(self.distance[0])
             elif BC.BC_side =='outer':
-                Qnet = self.Q(self.radii[-1]*(1-1e-10))
+                Qnet = self.Q(self.distance[-1]*(1-1e-10))
             row['net heat transfer into layer/boundary [W/m]']=Qnet
             rows.append(pd.Series(data=row))
         #readable headings
@@ -771,3 +680,250 @@ class RadialExact1D:
         df=pd.DataFrame(rows) #make the dataframe
         df=df.rename(columns=column_head) #rename the column headings
         return df
+            
+class Linear1D(Thermal1D):
+    """
+    Class for building up system of equations, solving the integration
+    constants for the solid layers.
+    
+    Parameters
+    ----------
+        layers: list of layer objects
+            The layers from inner to outer radius inside a list.
+        BC_1: boundary_layer object
+            The first boundary layer.
+        BC_1: boundary_layer object
+            The second boundary layer.    
+    Returns
+    ----------
+    Radial1D object.
+    
+    Methods to evaluate the temperature, heat flux and heat transfer at any
+    radial position.
+    Method to plot the temperature, heat flux and heat transfer data.
+    Method to return a dataframe of inputs and most results of interest to be
+    eacily manipulated, filtered and exported in desired data format using
+    pandas inbuilt methods.
+    """                
+    def __init__(self, layers, BC_1, BC_2, width = 1):
+        super().__init__(layers, BC_1, BC_2)
+        distance = [0]
+        for i in range(len(layers)):
+            distance.append(distance[i]+layers[i].t)
+        self.distance = distance
+        self.analysis_type = 'linear'
+        self.width=width
+    def temp_continuity(self,x,k0,k1,V0,V1,R):
+        A = np.array([[x+k0*R, 1, -x, -1]])
+        B = x*(V0*(R+x/(2*k0))-V1*x/(2*k1))
+        return A, B
+    def heat_continuity(self,x,k0,k1,V0,V1):
+        A = np.array([[-k0,0,k1,0]])
+        B = x*(V1-V0)
+        return A, B
+    def temperature_bound(self,sgn,x,k,R,V,T_inf):
+        A = np.array([[sgn*k*R-x, -1]])
+        B = V*x*(sgn*R-x/(2*k)) - T_inf
+        return A, B
+    def heatflux_bound(self,x,k,q,V):
+        A = np.array([[1, 0]])
+        B = -1/k*(q - V*x)
+        return A, B
+    def T_solid(self,x,layer,layer_i):
+        """
+        Parameters
+        ----------
+        rad : float
+            radial position from center [m].
+        layer : solid_layer object
+            The solid layer in which to calculate the temperature.
+        layer_i : int
+            layer index of the layer in which to calculate the temperature.
+
+        Returns
+        -------
+        float
+            Temperature [K]
+        """
+    
+        if not hasattr(self,'C_'):
+            self.C()
+        V_heat, k = layer.V_heat, layer.k
+        solid_layer_i = sum(self.solid_map[0:layer_i])
+        CA, CB = self.C_[2*solid_layer_i],self.C_[2*solid_layer_i+1]
+        return -V_heat*x**2/(2*k) + CA*x + CB 
+    def q(self,distance):
+        """
+        Returns heat flux [W/m^2] given any radial position [m].
+        
+        Parameters
+        ----------
+        rad : float
+            radial position from center [m].
+
+        Returns
+        -------
+        q: float, np.nan
+            heat flux [W/m^2]. Returns np.nan if not in defined system range.
+        """
+        #calculating heat flux at a radial position
+        if not hasattr(self,'C_'):
+            self.C()
+        layer_i = self.layer_index_for_distance(distance)
+        if layer_i == 'outer' or layer_i == 'inner':
+            return np.nan
+        elif self.layers[layer_i].layer_type == 'fluid':
+            return np.nan
+        else:
+            layer = self.layers[layer_i]
+            V_heat, k = layer.V_heat, layer.k
+            solid_layer_i = sum(self.solid_map[0:layer_i])
+            CA = self.C_[2*solid_layer_i][0]
+            return self.q_solid(distance, V_heat, k, CA)
+    def q_solid(self,distance, V_heat, k, CA):
+        return -k*(-V_heat*distance/k + CA)
+    def Q(self, distance):
+        """
+        Returns heat transfer for unit length [W/m] given any radial position
+        [m]
+        
+        Parameters
+        ----------
+        rad : float
+            distance from inner boundary [m].
+
+        Returns
+        -------
+        q: float
+            heat transfer [W/m]. Returns np.nan if not in defined system range.
+        """
+        #calculating heat transfer at a radial position
+        return self.q(distance)*self.width
+    
+class Radial1D(Thermal1D):
+    """
+    Class for building up system of equations, solving the integration
+    constants for the solid layers.
+    
+    Parameters
+    ----------
+        rad_inner: float
+            the inner radius of the system in meters.
+        layers: list of layer objects
+            The layers from inner to outer radius inside a list.
+        BC_1: boundary_layer object
+            The first boundary layer.
+        BC_1: boundary_layer object
+            The second boundary layer.    
+    Returns
+    ----------
+    Radial1D object.
+    
+    Methods to evaluate the temperature, heat flux and heat transfer at any
+    radial position.
+    Method to plot the temperature, heat flux and heat transfer data.
+    Method to return a dataframe of inputs and most results of interest to be
+    eacily manipulated, filtered and exported in desired data format using
+    pandas inbuilt methods.
+    """
+    def __init__(self, rad_inner, layers, BC_1, BC_2):
+        super().__init__(layers, BC_1, BC_2)
+        if rad_inner<=0:
+            raise ValueError('rad_inner must be non-zero and positive.')
+        distance = [rad_inner]
+        for i in range(len(layers)):
+            distance.append(distance[i]+layers[i].t)
+        self.distance = distance
+        self.analysis_type = 'radial'
+    def temp_continuity(self,r,k0,k1,V0,V1,R):
+        A = np.array([[np.log(r)+R*k0/r, 1, -np.log(r), -1]])
+        B = r/2*(V0*(R+r/(2*k0))-V1*r/(2*k1))
+        return A, B
+    def heat_continuity(self,r,k0,k1,V0,V1):
+        A = np.array([[-k0,0,k1,0]])
+        B = r**2/2*(V1-V0)
+        return A, B
+    def heatflux_bound(self,r,k,q,V):
+        A = np.array([[1, 0]])
+        B = -r/k*(q - V*r/2)
+        return A, B
+    def temperature_bound(self,sgn,r,k,R,V,T_inf):
+        A = np.array([[sgn*k*R/r-np.log(r), -1]])
+        B = V*r/2*(sgn*R-r/(2*k)) - T_inf
+        return A, B
+    def q(self,rad):
+        """
+        Returns heat flux [W/m^2] given any radial position [m].
+        
+        Parameters
+        ----------
+        rad : float
+            radial position from center [m].
+
+        Returns
+        -------
+        q: float, np.nan
+            heat flux [W/m^2]. Returns np.nan if not in defined system range.
+        """
+        #calculating heat flux at a radial position
+        if not hasattr(self,'C_'):
+            self.C()
+        layer_i = self.layer_index_for_distance(rad)
+        if layer_i == 'outer' or layer_i == 'inner':
+            return np.nan
+        elif self.layers[layer_i].layer_type == 'fluid':
+            return np.nan
+        else:
+            layer = self.layers[layer_i]
+            V_heat, k = layer.V_heat, layer.k
+            solid_layer_i = sum(self.solid_map[0:layer_i])
+            CA = self.C_[2*solid_layer_i][0]
+            return self.q_solid(rad, V_heat, k, CA)
+        
+    def q_solid(self,rad, V_heat, k, CA):     
+        #return -(k/rad*CA-V_heat*rad/2)
+        return -k*(-V_heat*rad/(2*k) + CA/rad)
+    
+    def Q(self,rad):
+        """
+        Returns heat transfer for unit length [W/m] given any radial position
+        [m]
+        
+        Parameters
+        ----------
+        rad : float
+            radial position from center [m].
+
+        Returns
+        -------
+        q: float
+            heat transfer [W/m]. Returns np.nan if not in defined system range.
+        """
+        #calculating heat transfer at a radial position
+        return self.q(rad)*2*np.pi*rad
+        
+        return
+    def T_solid(self,rad,layer,layer_i):
+        """
+        Parameters
+        ----------
+        rad : float
+            radial position from center [m].
+        layer : solid_layer object
+            The solid layer in which to calculate the temperature.
+        layer_i : int
+            layer index of the layer in which to calculate the temperature.
+
+        Returns
+        -------
+        float
+            Temperature [K]
+        """
+    
+        if not hasattr(self,'C_'):
+            self.C()
+        V_heat, k = layer.V_heat, layer.k
+        solid_layer_i = sum(self.solid_map[0:layer_i])
+        CA, CB = self.C_[2*solid_layer_i],self.C_[2*solid_layer_i+1]
+        return -V_heat/(4*k)*rad**2+CA*np.log(rad)+CB
+    
