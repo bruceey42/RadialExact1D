@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Attempt to create a generalised 1-D code for heat transfer through concentric
-cylinders with internal heat generation.
-The RadialExact1D class is used to assemble and solve the system of
-equations. It takes,
--the inner radius,
--a list containing layer objects,
--2 boundary conditions.
+Attempt to create a generalised 1-D code for heat transfer for linear and
+cylindrical systems.
+
+The Thermal1D class is used to assemble and solve the system of equations - 
+it is generally not for use by the user who should instead use the child
+Linear1D and Radial1D classes.
+
+The Linear1D and Radial1D classes contain the specific continuity equations
+and boundary conditions to be assembled and solved Thermal1D. There is inbuilt
+plotting and summary dataframe provided.
 
 Boundary condition (boundary_condition class) support:
     1. Temperature with optional thermal resistance at the interface.
@@ -42,7 +45,8 @@ Radial outward build configuration.
 The layer properties are then arranged into a system of simultaneous equations
 to solve the integration constants for all the solid layers.
 After these constants have been calculated the temperature, heatflux or
-heat transfer at any radial position can be trivially calculated.
+heat transfer at any position can be trivially calculated using the inbuilt
+methods.
 @author: bruce
 """
 import numpy as np
@@ -181,6 +185,8 @@ class boundary_condition:
 class Thermal1D:
     """
     Generic 1D class with common methods useful to 1D thermal systems.
+    Includes the building and solving of the simultaneous equations to find
+    the integration constants required for each solid layer.
     """            
     def __init__(self, layers, BC_1, BC_2):
         if layers[0].layer_type == 'fluid':
@@ -304,13 +310,11 @@ class Thermal1D:
         self.C_=C_ #store result as attribute
     
     def T(self,distance):
-        """
-        Returns temperature [K] given any radial position [m]
-        
+        """      
         Parameters
         ----------
-        rad : float
-            radial position from center [m].
+        distance : float
+            radial/linear position from center/first edge [m].
 
         Returns
         -------
@@ -389,9 +393,12 @@ class Thermal1D:
             If true labels layers. Draw layer boundaries.
             The default is 0.
         Q_labels : boolean (0,1, True, False) optional
+            If true labels the internal heat generation for each solid layer
+            and the net heat transfer for each fluid layer. 
+            The default is 0.
+        patches : boolean (0,1, True, False) optional
             If true labels layers by drawing patches in layer and adding a
             legend.
-            The default is 0.
         Returns
         -------
         figure
@@ -436,7 +443,7 @@ class Thermal1D:
             ax1.set_xlabel('Radius [mm]')
         elif self.analysis_type == 'linear':
             ax1.set_xlabel('Thickness [mm]')
-        ax1.set_ylabel(r'Temperature K', color='r')
+        ax1.set_ylabel(r'Temperature [K]', color='r')
         ax1.plot(distances*1e3,T,'r-', label='Temperature')
         if plotq == 1 and plotQ==1:
             #offset axis to stop overlap
@@ -693,10 +700,12 @@ class Linear1D(Thermal1D):
         BC_1: boundary_layer object
             The first boundary layer.
         BC_1: boundary_layer object
-            The second boundary layer.    
+            The second boundary layer. 
+        width: float
+            optional. Default is 1.0.
     Returns
     ----------
-    Radial1D object.
+    Linear1D object.
     
     Methods to evaluate the temperature, heat flux and heat transfer at any
     radial position.
@@ -705,7 +714,7 @@ class Linear1D(Thermal1D):
     eacily manipulated, filtered and exported in desired data format using
     pandas inbuilt methods.
     """                
-    def __init__(self, layers, BC_1, BC_2, width = 1):
+    def __init__(self, layers, BC_1, BC_2, width = 1.0):
         super().__init__(layers, BC_1, BC_2)
         distance = [0]
         for i in range(len(layers)):
@@ -714,18 +723,121 @@ class Linear1D(Thermal1D):
         self.analysis_type = 'linear'
         self.width=width
     def temp_continuity(self,x,k0,k1,V0,V1,R):
+        """
+        Returns LHS and RHS of temperature continuity equation at each solid-
+        solid layer interface.
+
+        Parameters
+        ----------
+        x : float
+            Layer interface x-coord [m] (first layer first boundary at x=0)
+        k0 : float
+            thermal conductivity of ith solid layer [W/mK]
+        k1 : float
+            thermal conductivity of ith+1 solid layer [W/mK]
+        V0 : float
+            Volumetric heat generation of ith solid layer [W/m^3]
+        V1 : flaot
+            Volumetric heat generation of ith+1 solid layer [W/m^3]
+        R : float
+            Thermal contact resistance of layer interface [m^2.K/W]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+
+        """
         A = np.array([[x+k0*R, 1, -x, -1]])
         B = x*(V0*(R+x/(2*k0))-V1*x/(2*k1))
         return A, B
     def heat_continuity(self,x,k0,k1,V0,V1):
+        """
+        Returns LHS and RHS of heat continuity equation at each solid-
+        solid layer interface.
+
+        Parameters
+        ----------
+        x : float
+            Layer interface x-coord [m] (first layer first boundary at x=0)
+        k0 : float
+            thermal conductivity of ith solid layer [W/mK]
+        k1 : float
+            thermal conductivity of ith+1 solid layer [W/mK]
+        V0 : float
+            Volumetric heat generation of ith solid layer [W/m^3]
+        V1 : flaot
+            Volumetric heat generation of ith+1 solid layer [W/m^3]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+
+        """
         A = np.array([[-k0,0,k1,0]])
         B = x*(V1-V0)
         return A, B
     def temperature_bound(self,sgn,x,k,R,V,T_inf):
+        """
+        Returns LHS and RHS of temperatyre boundary condition. Can be used
+        to represent a temperature boundary condition, a thermal contact
+        resistance between a solid-solid interface or a convection boundary
+        at a fluid-solid or solid-fluid interface.
+
+        Parameters
+        ----------
+        sgn : 1, -1
+            1 for boundary-solid interfaces, -1 for solid-boundary interfaces
+        x : float
+            Layer interface x-coord [m] (first layer first boundary at x=0)
+        k : float
+            thermal conductivity of solid layer [W/mK]
+        R : float
+            Thermal resistance (1/heat transfer coefficient) [m^2 K / W]
+        V : flaot
+            Volumetric heat generation in solid layer [W/m^3]
+        T_inf : float
+            Bulk temperature of solid or fluid boundary (wall temperature
+            when R=0) [K]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+
+        """
         A = np.array([[sgn*k*R-x, -1]])
         B = V*x*(sgn*R-x/(2*k)) - T_inf
         return A, B
     def heatflux_bound(self,x,k,q,V):
+        """
+        LHS and RHS of heat flux boundary condition.
+        
+        Parameters
+        ----------
+        x : float
+            Layer interface x-coord [m] (first layer first boundary at x=0)
+        k : float
+            thermal conductivity of solid layer [W/mK]
+        q : float
+            heat flux applied to surface.
+        V : flaot
+            Volumetric heat generation in solid layer [W/m^3]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+        """
         A = np.array([[1, 0]])
         B = -1/k*(q - V*x)
         return A, B
@@ -733,8 +845,8 @@ class Linear1D(Thermal1D):
         """
         Parameters
         ----------
-        rad : float
-            radial position from center [m].
+        x : float
+            distance from first layer outer face [m].
         layer : solid_layer object
             The solid layer in which to calculate the temperature.
         layer_i : int
@@ -754,12 +866,12 @@ class Linear1D(Thermal1D):
         return -V_heat*x**2/(2*k) + CA*x + CB 
     def q(self,distance):
         """
-        Returns heat flux [W/m^2] given any radial position [m].
+        Returns heat flux [W/m^2] given any position [m].
         
         Parameters
         ----------
-        rad : float
-            radial position from center [m].
+        distance : float
+            distance from first layer outer face [m].
 
         Returns
         -------
@@ -781,6 +893,24 @@ class Linear1D(Thermal1D):
             CA = self.C_[2*solid_layer_i][0]
             return self.q_solid(distance, V_heat, k, CA)
     def q_solid(self,distance, V_heat, k, CA):
+        """
+        Parameters
+        ----------
+        distance : float
+            distance from first layer outer face [m].
+        V_heat : flaot
+            Volumetric heat generation in solid layer [W/m^3]
+        k : flaot
+            thermal conductivity of solid layer [W/mK]
+        CA : float
+            first integation constant [K/m]
+
+        Returns
+        -------
+        float
+            Heat flux in a solid [W/m^2] at given position [m]..
+
+        """
         return -k*(-V_heat*distance/k + CA)
     def Q(self, distance):
         """
@@ -789,8 +919,8 @@ class Linear1D(Thermal1D):
         
         Parameters
         ----------
-        rad : float
-            distance from inner boundary [m].
+        distance : float
+            x-coord from first layer [m].
 
         Returns
         -------
@@ -834,20 +964,124 @@ class Radial1D(Thermal1D):
         for i in range(len(layers)):
             distance.append(distance[i]+layers[i].t)
         self.distance = distance
+        self.radii = distance
         self.analysis_type = 'radial'
     def temp_continuity(self,r,k0,k1,V0,V1,R):
+        """
+        Returns LHS and RHS of temperature continuity equation at each solid-
+        solid layer interface.
+
+        Parameters
+        ----------
+        r : float
+            Layer interface radius [m]
+        k0 : float
+            thermal conductivity of ith solid layer [W/mK]
+        k1 : float
+            thermal conductivity of ith+1 solid layer [W/mK]
+        V0 : float
+            Volumetric heat generation of ith solid layer [W/m^3]
+        V1 : flaot
+            Volumetric heat generation of ith+1 solid layer [W/m^3]
+        R : float
+            Thermal contact resistance of layer interface [m^2.K/W]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+
+        """
         A = np.array([[np.log(r)+R*k0/r, 1, -np.log(r), -1]])
         B = r/2*(V0*(R+r/(2*k0))-V1*r/(2*k1))
         return A, B
     def heat_continuity(self,r,k0,k1,V0,V1):
+        """
+        Returns LHS and RHS of heat continuity equation at each solid-
+        solid layer interface.
+
+        Parameters
+        ----------
+        r : float
+            Layer interface radius [m]
+        k0 : float
+            thermal conductivity of ith solid layer [W/mK]
+        k1 : float
+            thermal conductivity of ith+1 solid layer [W/mK]
+        V0 : float
+            Volumetric heat generation of ith solid layer [W/m^3]
+        V1 : flaot
+            Volumetric heat generation of ith+1 solid layer [W/m^3]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+
+        """
         A = np.array([[-k0,0,k1,0]])
         B = r**2/2*(V1-V0)
         return A, B
     def heatflux_bound(self,r,k,q,V):
+        """
+        LHS and RHS of heat flux boundary condition.
+        
+        Parameters
+        ----------
+        r : float
+            Layer interface radius [m]
+        k : float
+            thermal conductivity of solid layer [W/mK]
+        q : float
+            heat flux applied to surface.
+        V : flaot
+            Volumetric heat generation in solid layer [W/m^3]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+        """
         A = np.array([[1, 0]])
         B = -r/k*(q - V*r/2)
         return A, B
     def temperature_bound(self,sgn,r,k,R,V,T_inf):
+        """
+        Returns LHS and RHS of temperatyre boundary condition. Can be used
+        to represent a temperature boundary condition, a thermal contact
+        resistance between a solid-solid interface or a convection boundary
+        at a fluid-solid or solid-fluid interface.
+
+        Parameters
+        ----------
+        sgn : 1, -1
+            1 for boundary-solid interfaces, -1 for solid-boundary interfaces
+        r : ffloat
+            Layer interface radius [m]
+        k : float
+            thermal conductivity of solid layer [W/mK]
+        R : float
+            Thermal resistance (1/heat transfer coefficient) [m^2 K / W]
+        V : flaot
+            Volumetric heat generation in solid layer [W/m^3]
+        T_inf : float
+            Bulk temperature of solid or fluid boundary (wall temperature
+            when R=0) [K]
+
+        Returns
+        -------
+        A : numpy array
+            Integration constant coefficients.
+        B : float
+            RHS of continuity equation.
+
+        """
         A = np.array([[sgn*k*R/r-np.log(r), -1]])
         B = V*r/2*(sgn*R-r/(2*k)) - T_inf
         return A, B
@@ -880,8 +1114,25 @@ class Radial1D(Thermal1D):
             CA = self.C_[2*solid_layer_i][0]
             return self.q_solid(rad, V_heat, k, CA)
         
-    def q_solid(self,rad, V_heat, k, CA):     
-        #return -(k/rad*CA-V_heat*rad/2)
+    def q_solid(self,rad, V_heat, k, CA):
+        """
+        Parameters
+        ----------
+        rad : float
+            radial position from center [m].
+        V_heat : flaot
+            Volumetric heat generation in solid layer [W/m^3]
+        k : flaot
+            thermal conductivity of solid layer [W/mK]
+        CA : float
+            first integation constant [K/m]
+
+        Returns
+        -------
+        float
+            Heat flux in a solid [W/m^2] at given position [m]..
+
+        """
         return -k*(-V_heat*rad/(2*k) + CA/rad)
     
     def Q(self,rad):
