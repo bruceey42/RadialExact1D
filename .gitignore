@@ -1,2 +1,10 @@
 
 playground.py
+thermpy1d.egg-info/dependency_links.txt
+thermpy1d.egg-info/PKG-INFO
+thermpy1d.egg-info/top_level.txt
+thermpy1d.egg-info/SOURCES.txt
+thermpy1d.egg-info/requires.txt
+dist/thermpy1d-0.1-py3-none-any.whl
+*.gz
+*.png

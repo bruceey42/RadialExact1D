@@ -1,6 +1,8 @@
 # ThermPy1D
 Tools to provide analytical and semi-discrete solutions to radial and linear heat transfer problems with internal heat generation.
 See the Jupyter notebooks and example scripts for examples of how to generate, visualise and export results.
+Pull the latest version from https://github.com/bruceey42/ThermPy1D
+See interactive usage examples using the jupyter notebook https://github.com/bruceey42/ThermPy1D/blob/main/Examples.ipynb
 
 Please verify that this 1-D analytical tool is suitable for your purposes and exercise due dilligence to verify the results. 
 
