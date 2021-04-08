@@ -374,7 +374,8 @@ class Thermal1D:
                plotq=1,
                show_bounds=1,
                Q_labels=0,
-               patches=0, 
+               patches=0,
+               set_alpha=0.5
                ):
         """
         Plots the temperature profile through the wall thickness.
@@ -551,7 +552,7 @@ class Thermal1D:
             col = {} #colours corresponding to labels
             prop = np.linspace(0,1,N) #equispaced sampling for colour spetrum
             for (key,val) in unique_labels.items():
-               col[key]=cm.rainbow(prop[i],alpha=0.2) 
+               col[key]=cm.rainbow(prop[i],alpha=set_alpha) 
                i+=1
             i=0
             ymin = ax1.get_ylim()[0]
