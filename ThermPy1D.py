@@ -195,8 +195,6 @@ class Thermal1D:
         if layers[-1].layer_type == 'fluid':
             raise RuntimeError('Final layer cannot be a "fluid_layer" object.\n'+
                               'Use fluid outer boundary condition instead.')
-        if (BC_1.BC_type == 'heat flux') and (BC_2.BC_type == 'heat flux'):
-            raise RuntimeError('Cannot have two heat flux boundary conditions.')
         if (BC_1.BC_side==BC_2.BC_side) and ((BC_1.BC_type!='heat flux') and (BC_2.BC_type!='heat flux')):
             raise RuntimeError('Cannot have two BCs at same boundary unless 1 is type "heat flux".')
         solid_map=[]
@@ -213,6 +211,8 @@ class Thermal1D:
                 fluid_map.append(1)
         self.solid_map = solid_map
         self.fluid_map = fluid_map
+        if (BC_1.BC_type == 'heat flux') and (BC_2.BC_type == 'heat flux') and 1 not in self.fluid_map:
+            raise RuntimeError('Cannot have two heat flux boundary conditions.')
         self.layers = layers
         self.BC = [BC_1, BC_2]
         self.BC_in = []
@@ -374,7 +374,7 @@ class Thermal1D:
                plotq=1,
                show_bounds=1,
                Q_labels=0,
-               patches=0,
+               patches=1,
                set_alpha=0.5
                ):
         """
