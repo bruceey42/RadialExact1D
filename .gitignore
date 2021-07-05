@@ -8,3 +8,4 @@ thermpy1d.egg-info/requires.txt
 dist/thermpy1d-0.1-py3-none-any.whl
 *.gz
 *.png
+results.csv
