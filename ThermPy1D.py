@@ -179,8 +179,13 @@ class boundary_condition:
         for (key, val) in kword_dict[BC_type].items():
             if val == 1 and (key not in kwargs):
                 raise NameError('Missing required keyword arguement "{}" for BC_type "{}" for {}'.format(key,BC_type,self))
-        if not hasattr(self,'label'):
-            self.label=None
+            elif val == 0 and (key not in kwargs):
+                if key == 'label':
+                    self.label = None
+                elif key == 'R':
+                    setattr(self, key, 0)
+        # if not hasattr(self,'label'):
+        #     self.label=None
       
 class Thermal1D:
     """
@@ -406,7 +411,14 @@ class Thermal1D:
 
         """
         T=[]
-        distances = np.linspace(self.distance[0]*0.95,self.distance[-1]*1.05,dpoints)
+        if (self.distance[0] == 0) and (self.analysis_type == 'radial'):
+            distances = np.linspace(0 + self.distance[1]/1e9,
+                                    self.distance[-1]*1.05,
+                                    dpoints)
+        else:
+            distances = np.linspace(self.distance[0]*0.95,
+                                    self.distance[-1]*1.05,
+                                    dpoints)
         plotnum=1
         if plotQ==True:
             plotnum+=1
@@ -606,6 +618,11 @@ class Thermal1D:
             coord='r'
         elif self.analysis_type == 'linear':
             coord='x'
+        if (self.distance[0] == 0) and self.analysis_type in ['radial', 'spherical']: #to supress divide by zero errors
+            self.distance[0] = 0 + self.distance[1]/1e9
+            self.zero_radial = True
+        else:
+            self.zero_radial = False
         for layer in self.layers:
             row={}
             row['object']='layer'
@@ -671,6 +688,8 @@ class Thermal1D:
                 Qnet = self.Q(self.distance[-1]*(1-1e-10))
             row['net heat transfer into layer/boundary [W/m]']=Qnet
             rows.append(pd.Series(data=row))
+        if self.zero_radial == True:
+                self.distance[0] = 0
         #readable headings
         column_head={'t':'layer thickness [m]',
             'layer_type':'layer type',
@@ -959,8 +978,22 @@ class Radial1D(Thermal1D):
     """
     def __init__(self, rad_inner, layers, BC_1, BC_2):
         super().__init__(layers, BC_1, BC_2)
-        if rad_inner<=0:
-            raise ValueError('rad_inner must be non-zero and positive.')
+        if rad_inner<0:
+            raise ValueError('rad_inner must be positive.')
+        elif rad_inner == 0:
+            if (((self.BC[0].BC_side == 'inner') and 
+                 (self.BC[0].BC_type == 'heat flux')) or 
+                ((self.BC[1].BC_side == 'inner') and 
+                 (self.BC[1].BC_type == 'heat flux'))):
+                #rad_inner = 0 + self.layers[0].t/1e6 #for maths to work
+                for BC in self.BC:
+                    if ((BC.BC_side == 'inner') and 
+                        (BC.BC_type == 'heat flux') and
+                        (BC.q!=0)):
+                        print('for inner radius == 0, consider setting q=0 '+ 
+                              'for inner BC for physical result')
+            else:
+                raise ValueError('must apply inner heat flux BC for inner rad == 0')
         distance = [rad_inner]
         for i in range(len(layers)):
             distance.append(distance[i]+layers[i].t)
@@ -1083,6 +1116,9 @@ class Radial1D(Thermal1D):
             RHS of continuity equation.
 
         """
+        if r == 0:
+        #avoid divide by zero in zero radius problems
+            r = 0 + self.distance[1]/1e9
         A = np.array([[sgn*k*R/r-np.log(r), -1]])
         B = V*r/2*(sgn*R-r/(2*k)) - T_inf
         return A, B
