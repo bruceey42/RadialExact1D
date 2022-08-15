@@ -563,7 +563,7 @@ class Thermal1D:
             i=0
             col = {} #colours corresponding to labels
             prop = np.linspace(0,1,N) #equispaced sampling for colour spetrum
-            for (key,val) in unique_labels.items():
+            for (key,val) in sorted(unique_labels.items(), key=lambda x: x[1]):
                col[key]=cm.rainbow(prop[i],alpha=set_alpha) 
                i+=1
             i=0
@@ -591,16 +591,17 @@ class Thermal1D:
                               yrange,
                               color=colour,
                               label=unique_labels[self.BC_out[0]]))
-                patch_list.append(Rectangle((0,0),0,0,
-                                            color=col[self.BC_in[0]],
-                                            label=unique_labels[self.BC_in[0]]))
-                patch_list.append(Rectangle((0,0),0,0,
-                                            color=col[self.BC_out[0]],
-                                            label=unique_labels[self.BC_out[0]]))
-            for layer in unique_layers:
+                # patch_list.append(Rectangle((0,0),0,0,
+                #                             color=col[self.BC_in[0]],
+                #                             label=unique_labels[self.BC_in[0]]))
+                # patch_list.append(Rectangle((0,0),0,0,
+                #                             color=col[self.BC_out[0]],
+                #                             label=unique_labels[self.BC_out[0]]))
+            for (layer, label) in sorted(unique_labels.items(), key=lambda x: x[1]):
                 patch_list.append(Rectangle((0,0),0,0,
                                             color=col[layer],
                                             label=unique_labels[layer]))
+
         ax1.legend(handles=patch_list, loc='best')
         fig.tight_layout()
         return fig
