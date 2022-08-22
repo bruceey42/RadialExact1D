@@ -411,6 +411,7 @@ class Thermal1D:
 
         """
         T=[]
+        axs=[]
         if (self.distance[0] == 0) and (self.analysis_type == 'radial'):
             distances = np.linspace(0 + self.distance[1]/1e9,
                                     self.distance[-1]*1.05,
@@ -434,13 +435,16 @@ class Thermal1D:
                 q.append(self.q(r))
         fig=plt.figure()
         ax1 = fig.add_subplot(111)
+        axs.append(ax1)
         if plotQ==True:
             Qax = ax1.twinx()
+            axs.append(Qax)
             Qax.set_ylabel(r'Heat transfer W/m',color='b')
             Qax.plot(distances*1e3,Q,'b-', label='Heat Transfer')
             Qax.ticklabel_format(style='sci',axis='y', scilimits=(-2,2))
         if plotq==True:
             qax = ax1.twinx()
+            axs.append(qax)
             qax.set_ylabel(r'Heat flux W/m$^2$',color='m')
             qax.plot(distances*1e3,q,'m-', label='Heat Flux')
             qax.ticklabel_format(style='sci',axis='y', scilimits=(0,0))
@@ -604,7 +608,7 @@ class Thermal1D:
 
         ax1.legend(handles=patch_list, loc='best')
         fig.tight_layout()
-        return fig
+        return fig, axs
 
     def results(self):
         """
@@ -641,7 +645,10 @@ class Thermal1D:
                 #boundary temperatures (i.e. if you set dT/dr=0 do you get
                 #a real radius value... for this CA must be positive.
                 if self.C_[2*i_sol]>0:
-                    r_Tmax = (2*layer.k*self.C_[2*i_sol]/layer.V_heat)**0.5
+                    if self.analysis_type == 'radial':
+                        r_Tmax = (2*layer.k*self.C_[2*i_sol]/layer.V_heat)**0.5
+                    elif self.analysis_type == 'linear':
+                        r_Tmax = layer.k*self.C_[2*i_sol]/layer.V_heat
                     if r_Tmax<=self.distance[i+1] and r_Tmax>=self.distance[i]:
                         row['T_max [K]']=self.T(r_Tmax)
                     else:
